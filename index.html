@@ -103,46 +103,60 @@ function App(){
 function ReceiptModal({stores,selectedStore,setSelectedStore,onClose,onSave}){
   const[analysis,setAnalysis]=useState(null);
   const[analyzing,setAnalyzing]=useState(false);
-  const fileRef=useRef();
-  const analyze=async file=>{
+  const[pastedText,setPastedText]=useState("");
+  const analyze=async()=>{
+    if(!pastedText.trim())return;
     setAnalyzing(true);
     try{
-      const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file)});
-      const resp=await fetch("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json",},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:file.type||"image/jpeg",data:b64}},{type:"text",text:`Analise este comprovante. Retorne APENAS JSON válido sem markdown:\n{"items":[{"name":"produto","qty":1,"unit":"un","price":0.00}],"total":0.00,"store":"loja ou null"}\nExtraia todos os itens com nome, quantidade, unidade e preço unitário.`}]}]})});
+      const resp=await fetch("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:`Analise este texto de comprovante/nota fiscal e extraia os dados. Retorne APENAS JSON válido sem markdown:\n{"items":[{"name":"produto","qty":1,"unit":"un","price":0.00}],"total":0.00,"store":"loja ou null","date":"data da compra ou null"}\nTexto:\n${pastedText}`}]})});
       const data=await resp.json();
-      const text=data.content?.find(b=>b.type==="text")?.text||"";
-      setAnalysis(JSON.parse(text.replace(/```json|```/g,"").trim()));
-    }catch{setAnalysis({error:"Não consegui ler o comprovante. Tente uma foto mais nítida."})}
+      const txt=data.content?.find(b=>b.type==="text")?.text||"";
+      setAnalysis(JSON.parse(txt.replace(/```json|```/g,"").trim()));
+    }catch{setAnalysis({error:"Não consegui interpretar o texto. Tente colar novamente."})}
     setAnalyzing(false);
   };
   const apply=()=>{
     if(!analysis?.items)return;
-    onSave(analysis.items.map(item=>({id:Date.now().toString()+Math.random(),productName:item.name,category:"Outros",qty:item.qty,unit:item.unit||"un",storeId:selectedStore,date:new Date().toISOString(),price:item.price})),analysis);
+    const date=analysis.date?new Date(analysis.date).toISOString():new Date().toISOString();
+    onSave(analysis.items.map(item=>({id:Date.now().toString()+Math.random(),productName:item.name,category:"Outros",qty:item.qty,unit:item.unit||"un",storeId:selectedStore,date,price:item.price})));
     onClose();
   };
   return(
     <div style={{position:"fixed",inset:0,background:"#00000055",zIndex:200,display:"flex",alignItems:"flex-end"}}>
-      <div className="slide-up" style={{width:"100%",maxWidth:480,margin:"0 auto",background:C.bg,borderRadius:"20px 20px 0 0",padding:24,border:`1px solid ${C.border}`}}>
+      <div className="slide-up" style={{width:"100%",maxWidth:480,margin:"0 auto",background:C.bg,borderRadius:"20px 20px 0 0",padding:24,border:`1px solid ${C.border}`,maxHeight:"90vh",overflowY:"auto"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <div style={{fontSize:16,color:C.viridian,fontWeight:"bold"}}>Foto do Comprovante</div>
+          <div style={{fontSize:16,color:C.viridian,fontWeight:"bold"}}>Adicionar Comprovante</div>
           <button onClick={onClose} style={{background:"none",border:"none",color:C.textMid}}><Icon name="close"/></button>
         </div>
         {!analysis&&!analyzing&&(<>
           <div style={{fontSize:12,color:C.textSoft,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Local da compra</div>
-          <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+          <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
             {stores.map(s=><button key={s.id} onClick={()=>setSelectedStore(s.id)} style={{padding:"7px 14px",borderRadius:20,border:`1.5px solid ${selectedStore===s.id?s.color:C.border}`,background:selectedStore===s.id?s.color+"18":"none",color:selectedStore===s.id?s.color:C.textMid,fontSize:13}}>{s.name}</button>)}
           </div>
-          <div style={{fontSize:13,color:C.textMid,marginBottom:16,lineHeight:1.7}}>Tire uma foto do cupom fiscal. A IA vai ler os itens e preços automaticamente.</div>
-          <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>e.target.files[0]&&analyze(e.target.files[0])}/>
-          <button onClick={()=>fileRef.current?.click()} style={{width:"100%",padding:"16px",borderRadius:12,border:`1.5px dashed ${C.viridianXL}`,background:"none",color:C.viridian,fontSize:15,display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
-            <Icon name="camera" size={20}/> Abrir câmera
+          <div style={{background:C.honey,borderRadius:12,padding:"14px 16px",marginBottom:16,border:`1px solid ${C.honeyDk}`}}>
+            <div style={{fontSize:12,color:C.viridian,fontWeight:"bold",marginBottom:8}}>Como fazer:</div>
+            <div style={{fontSize:13,color:C.textMid,lineHeight:1.8}}>
+              1. Abra a <b>Galeria</b> do iPhone e selecione a foto do cupom<br/>
+              2. Pressione e segure sobre o texto para <b>selecionar tudo</b><br/>
+              3. Toque em <b>Copiar</b><br/>
+              4. Cole aqui embaixo com um toque longo → Colar
+            </div>
+          </div>
+          <textarea
+            placeholder="Cole aqui o texto do comprovante..."
+            value={pastedText}
+            onChange={e=>setPastedText(e.target.value)}
+            style={{width:"100%",minHeight:120,background:C.bgCard,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",color:C.text,fontSize:13,lineHeight:1.6,resize:"vertical",marginBottom:12}}
+          />
+          <button onClick={analyze} disabled={!pastedText.trim()} style={{width:"100%",padding:"14px",borderRadius:10,border:"none",background:pastedText.trim()?C.viridian:C.bgDeep,color:pastedText.trim()?C.bg:C.textSoft,fontSize:14,letterSpacing:0.3}}>
+            Analisar comprovante →
           </button>
         </>)}
-        {analyzing&&<div style={{textAlign:"center",padding:"30px 0",color:C.textMid}}><div style={{width:32,height:32,border:`2px solid ${C.border}`,borderTopColor:C.viridian,borderRadius:"50%",margin:"0 auto 14px",animation:"spin 0.8s linear infinite"}}/> Analisando comprovante...</div>}
-        {analysis?.error&&<div style={{padding:14,background:C.errBg,borderRadius:10,color:C.err,fontSize:13}}>{analysis.error}</div>}
+        {analyzing&&<div style={{textAlign:"center",padding:"30px 0",color:C.textMid}}><div style={{width:32,height:32,border:`2px solid ${C.border}`,borderTopColor:C.viridian,borderRadius:"50%",margin:"0 auto 14px",animation:"spin 0.8s linear infinite"}}/> Lendo comprovante...</div>}
+        {analysis?.error&&<div style={{padding:14,background:C.errBg,borderRadius:10,color:C.err,fontSize:13,marginBottom:12}}>{analysis.error}<br/><button onClick={()=>{setAnalysis(null)}} style={{marginTop:8,background:"none",border:`1px solid ${C.err}`,borderRadius:6,padding:"6px 12px",color:C.err,fontSize:12}}>Tentar novamente</button></div>}
         {analysis?.items&&(<div>
-          <div style={{fontSize:11,color:C.textSoft,marginBottom:12,letterSpacing:1,textTransform:"uppercase"}}>{analysis.store&&`${analysis.store} · `}{analysis.items.length} itens encontrados</div>
-          <div style={{maxHeight:240,overflowY:"auto",marginBottom:14}}>
+          <div style={{fontSize:11,color:C.textSoft,marginBottom:12,letterSpacing:1,textTransform:"uppercase"}}>{analysis.store&&`${analysis.store} · `}{analysis.items.length} itens encontrados{analysis.date&&` · ${analysis.date}`}</div>
+          <div style={{maxHeight:220,overflowY:"auto",marginBottom:14}}>
             {analysis.items.map((item,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 12px",background:C.bgCard,borderRadius:8,marginBottom:6,border:`1px solid ${C.border}`}}>
               <div><div style={{fontSize:13,color:C.text}}>{item.name}</div><div style={{fontSize:11,color:C.textSoft}}>{item.qty} {item.unit}</div></div>
               <div style={{fontSize:14,color:C.viridian,fontWeight:"bold"}}>R$ {item.price?.toFixed(2)}</div>
