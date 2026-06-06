@@ -50,6 +50,7 @@ const svgs={
   check:`<polyline points="20 6 9 17 4 12"/>`,
   trash:`<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/>`,
   camera:`<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>`,
+  receipt:`<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>`,
   store:`<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>`,
   back:`<polyline points="15 18 9 12 15 6"/>`,
   close:`<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>`,
@@ -108,7 +109,22 @@ function ReceiptModal({stores,selectedStore,setSelectedStore,onClose,onSave}){
     if(!pastedText.trim())return;
     setAnalyzing(true);
     try{
-      const resp=await fetch("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:`Analise este texto de comprovante/nota fiscal e extraia os dados. Retorne APENAS JSON válido sem markdown:\n{"items":[{"name":"produto","qty":1,"unit":"un","price":0.00}],"total":0.00,"store":"loja ou null","date":"data da compra ou null"}\nTexto:\n${pastedText}`}]})});
+      const resp=await fetch("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:`Você vai analisar o texto de um cupom fiscal (NFC-e) brasileiro copiado do iPhone. O texto pode estar desorganizado, com quebras de linha no meio das palavras, códigos de barras e valores espalhados.
+
+Regras:
+1. Ignore códigos numéricos longos (EAN/código de barras com 13+ dígitos)
+2. Identifique cada produto pelo NOME (texto descritivo, geralmente em maiúsculas)
+3. Para cada produto extraia: quantidade (ex: 0,624 kg ou 1,000 UN), valor unitário (VL.UNIT) e valor total (VL.TOTAL)
+4. Ignore linhas de: DESCONTO ITEM, Qtde. total de itens, Valor total, Valor a Pagar, FORMA DE PAGAMENTO, chave NFC-e, CONSUMIDOR
+5. A data está no formato DD/MM/AAAA perto do texto "NFC-e no" ou "Serie"
+6. Use vírgula como decimal (ex: 2,80 = 2.80)
+7. Para qty, converta vírgula para ponto (ex: 0,624 = 0.624)
+
+Retorne APENAS JSON válido sem markdown sem texto extra:
+{"items":[{"name":"nome do produto","qty":1.0,"unit":"kg ou UN","price":0.00}],"total":0.00,"store":"nome da loja ou null","date":"DD/MM/AAAA ou null"}
+
+Texto do cupom:
+${pastedText}`}]})});
       const data=await resp.json();
       const txt=data.content?.find(b=>b.type==="text")?.text||"";
       setAnalysis(JSON.parse(txt.replace(/```json|```/g,"").trim()));
@@ -121,48 +137,73 @@ function ReceiptModal({stores,selectedStore,setSelectedStore,onClose,onSave}){
     onSave(analysis.items.map(item=>({id:Date.now().toString()+Math.random(),productName:item.name,category:"Outros",qty:item.qty,unit:item.unit||"un",storeId:selectedStore,date,price:item.price})));
     onClose();
   };
+  const[extraInfo,setExtraInfo]=useState({total:"",discount:"",paid:"",date:""});
   return(
     <div style={{position:"fixed",inset:0,background:"#00000055",zIndex:200,display:"flex",alignItems:"flex-end"}}>
-      <div className="slide-up" style={{width:"100%",maxWidth:480,margin:"0 auto",background:C.bg,borderRadius:"20px 20px 0 0",padding:24,border:`1px solid ${C.border}`,maxHeight:"90vh",overflowY:"auto"}}>
+      <div className="slide-up" style={{width:"100%",maxWidth:480,margin:"0 auto",background:C.bg,borderRadius:"20px 20px 0 0",padding:24,border:`1px solid ${C.border}`,maxHeight:"92vh",overflowY:"auto"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <div style={{fontSize:16,color:C.viridian,fontWeight:"bold"}}>Adicionar Comprovante</div>
+          <div style={{fontSize:16,color:C.viridian,fontWeight:"bold"}}>Informações do Cupom Fiscal</div>
           <button onClick={onClose} style={{background:"none",border:"none",color:C.textMid}}><Icon name="close"/></button>
         </div>
         {!analysis&&!analyzing&&(<>
           <div style={{fontSize:12,color:C.textSoft,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Local da compra</div>
-          <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
+          <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
             {stores.map(s=><button key={s.id} onClick={()=>setSelectedStore(s.id)} style={{padding:"7px 14px",borderRadius:20,border:`1.5px solid ${selectedStore===s.id?s.color:C.border}`,background:selectedStore===s.id?s.color+"18":"none",color:selectedStore===s.id?s.color:C.textMid,fontSize:13}}>{s.name}</button>)}
           </div>
+
           <div style={{background:C.honey,borderRadius:12,padding:"14px 16px",marginBottom:16,border:`1px solid ${C.honeyDk}`}}>
-            <div style={{fontSize:12,color:C.viridian,fontWeight:"bold",marginBottom:8}}>Como fazer:</div>
-            <div style={{fontSize:13,color:C.textMid,lineHeight:1.8}}>
-              1. Abra a <b>Galeria</b> do iPhone e selecione a foto do cupom<br/>
-              2. Pressione e segure sobre o texto para <b>selecionar tudo</b><br/>
-              3. Toque em <b>Copiar</b><br/>
-              4. Cole aqui embaixo com um toque longo → Colar
+            <div style={{fontSize:12,color:C.viridian,fontWeight:"bold",marginBottom:10}}>Como fazer:</div>
+            <div style={{fontSize:13,color:C.textMid,lineHeight:1.9}}>
+              1. Tire uma foto do cupom fiscal<br/>
+              2. Abra o <b>Manus</b> e envie a foto com o seguinte pedido:<br/>
+            </div>
+            <div style={{background:C.bgCard,borderRadius:8,padding:"10px 12px",margin:"10px 0",border:`1px solid ${C.border}`,fontSize:12,color:C.text,lineHeight:1.7,fontStyle:"italic"}}>
+              "Extraia deste cupom fiscal: a descrição de cada produto, quantidade, valor unitário e valor total de cada item. Depois informe: valor total dos produtos, desconto aplicado, valor a pagar e a data da compra."
+            </div>
+            <div style={{fontSize:13,color:C.textMid,lineHeight:1.9}}>
+              3. Copie a resposta do Manus<br/>
+              4. Cole no campo abaixo e clique em Analisar
             </div>
           </div>
+
+          <div style={{fontSize:12,color:C.textSoft,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Texto extraído pelo Manus</div>
           <textarea
-            placeholder="Cole aqui o texto do comprovante..."
+            placeholder="Cole aqui a resposta do Manus com os produtos e valores..."
             value={pastedText}
             onChange={e=>setPastedText(e.target.value)}
-            style={{width:"100%",minHeight:120,background:C.bgCard,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",color:C.text,fontSize:13,lineHeight:1.6,resize:"vertical",marginBottom:12}}
+            style={{width:"100%",minHeight:130,background:C.bgCard,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",color:C.text,fontSize:13,lineHeight:1.6,resize:"vertical",marginBottom:16}}
           />
+
+          <div style={{fontSize:12,color:C.textSoft,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>Informações gerais</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+            {[["total","Valor total (R$)","291,75"],["discount","Desconto (R$)","10,00"],["paid","Valor pago (R$)","281,75"],["date","Data da compra","06/06/2026"]].map(([k,l,ph])=>(
+              <div key={k}>
+                <div style={{fontSize:11,color:C.textSoft,marginBottom:4}}>{l}</div>
+                <input placeholder={ph} value={extraInfo[k]} onChange={e=>setExtraInfo(p=>({...p,[k]:e.target.value}))}
+                  style={{width:"100%",background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 11px",color:C.text,fontSize:13}}/>
+              </div>
+            ))}
+          </div>
+
           <button onClick={analyze} disabled={!pastedText.trim()} style={{width:"100%",padding:"14px",borderRadius:10,border:"none",background:pastedText.trim()?C.viridian:C.bgDeep,color:pastedText.trim()?C.bg:C.textSoft,fontSize:14,letterSpacing:0.3}}>
             Analisar comprovante →
           </button>
         </>)}
         {analyzing&&<div style={{textAlign:"center",padding:"30px 0",color:C.textMid}}><div style={{width:32,height:32,border:`2px solid ${C.border}`,borderTopColor:C.viridian,borderRadius:"50%",margin:"0 auto 14px",animation:"spin 0.8s linear infinite"}}/> Lendo comprovante...</div>}
-        {analysis?.error&&<div style={{padding:14,background:C.errBg,borderRadius:10,color:C.err,fontSize:13,marginBottom:12}}>{analysis.error}<br/><button onClick={()=>{setAnalysis(null)}} style={{marginTop:8,background:"none",border:`1px solid ${C.err}`,borderRadius:6,padding:"6px 12px",color:C.err,fontSize:12}}>Tentar novamente</button></div>}
+        {analysis?.error&&<div style={{padding:14,background:C.errBg,borderRadius:10,color:C.err,fontSize:13,marginBottom:12}}>{analysis.error}<br/><button onClick={()=>setAnalysis(null)} style={{marginTop:8,background:"none",border:`1px solid ${C.err}`,borderRadius:6,padding:"6px 12px",color:C.err,fontSize:12}}>Tentar novamente</button></div>}
         {analysis?.items&&(<div>
-          <div style={{fontSize:11,color:C.textSoft,marginBottom:12,letterSpacing:1,textTransform:"uppercase"}}>{analysis.store&&`${analysis.store} · `}{analysis.items.length} itens encontrados{analysis.date&&` · ${analysis.date}`}</div>
-          <div style={{maxHeight:220,overflowY:"auto",marginBottom:14}}>
+          <div style={{fontSize:11,color:C.textSoft,marginBottom:12,letterSpacing:1,textTransform:"uppercase"}}>{analysis.store&&`${analysis.store} · `}{analysis.items.length} itens · {extraInfo.date||analysis.date||""}</div>
+          <div style={{maxHeight:200,overflowY:"auto",marginBottom:12}}>
             {analysis.items.map((item,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 12px",background:C.bgCard,borderRadius:8,marginBottom:6,border:`1px solid ${C.border}`}}>
               <div><div style={{fontSize:13,color:C.text}}>{item.name}</div><div style={{fontSize:11,color:C.textSoft}}>{item.qty} {item.unit}</div></div>
-              <div style={{fontSize:14,color:C.viridian,fontWeight:"bold"}}>R$ {item.price?.toFixed(2)}</div>
+              <div style={{fontSize:14,color:C.viridian,fontWeight:"bold"}}>R$ {Number(item.price).toFixed(2)}</div>
             </div>)}
           </div>
-          {analysis.total&&<div style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",background:C.honey,borderRadius:8,marginBottom:14}}><span style={{fontSize:14,color:C.text}}>Total</span><span style={{fontSize:16,color:C.viridian,fontWeight:"bold"}}>R$ {analysis.total?.toFixed(2)}</span></div>}
+          <div style={{background:C.honey,borderRadius:10,padding:"12px 14px",marginBottom:14}}>
+            {extraInfo.total&&<div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:13,color:C.textMid}}>Total dos produtos</span><span style={{fontSize:13,color:C.text}}>R$ {extraInfo.total}</span></div>}
+            {extraInfo.discount&&<div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:13,color:C.textMid}}>Desconto</span><span style={{fontSize:13,color:C.err}}>- R$ {extraInfo.discount}</span></div>}
+            {extraInfo.paid&&<div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:14,color:C.text,fontWeight:"bold"}}>Valor pago</span><span style={{fontSize:15,color:C.viridian,fontWeight:"bold"}}>R$ {extraInfo.paid}</span></div>}
+          </div>
           <button onClick={apply} style={{width:"100%",padding:"14px",borderRadius:10,border:"none",background:C.viridian,color:C.bg,fontSize:14}}>Salvar no histórico</button>
         </div>)}
       </div>
@@ -192,8 +233,8 @@ function Lista({stores,products,purchases,SU,SP}){
   if(mode==="home")return(
     <div className="fade-in" style={{padding:"24px 20px"}}>
       <button onClick={()=>setShowReceipt(true)} style={{width:"100%",padding:"18px 20px",borderRadius:14,border:"none",background:C.viridian,color:C.bg,display:"flex",alignItems:"center",gap:14,marginBottom:28,boxShadow:"0 4px 16px #34494533"}}>
-        <div style={{width:44,height:44,borderRadius:10,background:"#ffffff22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Icon name="camera" size={24}/></div>
-        <div style={{textAlign:"left"}}><div style={{fontSize:16,fontWeight:"bold",letterSpacing:0.3}}>Adicionar comprovante</div><div style={{fontSize:12,opacity:0.7,marginTop:2}}>Foto do cupom fiscal → IA lê tudo</div></div>
+        <div style={{width:44,height:44,borderRadius:10,background:"#ffffff22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Icon name="receipt" size={24}/></div>
+        <div style={{textAlign:"left"}}><div style={{fontSize:16,fontWeight:"bold",letterSpacing:0.3}}>Adicionar informações do cupom</div><div style={{fontSize:12,opacity:0.7,marginTop:2}}>Via Manus → cole aqui → IA organiza tudo</div></div>
       </button>
       <div style={{fontSize:11,color:C.textSoft,letterSpacing:2,textTransform:"uppercase",marginBottom:16}}>Montar lista de compras</div>
       <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:24}}>
@@ -237,7 +278,7 @@ function Lista({stores,products,purchases,SU,SP}){
         <button onClick={()=>setMode("buildList")} style={{background:"none",border:"none",color:C.textMid,padding:4}}><Icon name="back"/></button>
         <div style={{flex:1}}><div style={{fontSize:13,color:C.viridian,fontWeight:"bold"}}>{sname}</div><div style={{fontSize:11,color:C.textSoft}}>{checked}/{list.length} itens</div></div>
       </div>
-      <button onClick={()=>setShowReceipt(true)} style={{width:"100%",padding:"13px 20px",background:C.viridian,border:"none",color:C.bg,display:"flex",alignItems:"center",justifyContent:"center",gap:10,fontSize:14,letterSpacing:0.5}}><Icon name="camera" size={18}/> Adicionar comprovante</button>
+      <button onClick={()=>setShowReceipt(true)} style={{width:"100%",padding:"13px 20px",background:C.viridian,border:"none",color:C.bg,display:"flex",alignItems:"center",justifyContent:"center",gap:10,fontSize:14,letterSpacing:0.5}}><Icon name="receipt" size={18}/> Adicionar informações do cupom</button>
       <div style={{height:3,background:C.stone}}><div style={{height:"100%",background:C.viridian,width:`${list.length?(checked/list.length)*100:0}%`,transition:"width 0.4s"}}/></div>
       <div style={{padding:"16px 20px"}}>
         {Object.entries(grouped).map(([cat,items])=><div key={cat} style={{marginBottom:20}}><div style={{fontSize:10,color:C.textSoft,letterSpacing:2,textTransform:"uppercase",marginBottom:8}}>{cat}</div>{items.map(item=><div key={item.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:item.checked?C.sky+"55":C.bgCard,borderRadius:10,marginBottom:8,border:`1px solid ${item.checked?C.skyDk:C.border}`,transition:"all 0.2s"}}><button onClick={()=>toggle(item.id)} style={{width:26,height:26,borderRadius:6,border:`1.5px solid ${item.checked?C.viridian:C.borderDk}`,background:item.checked?C.viridian:"none",display:"flex",alignItems:"center",justifyContent:"center",color:C.bg,flexShrink:0}}>{item.checked&&<Icon name="check" size={14}/>}</button><div style={{flex:1}}><div style={{fontSize:14,color:item.checked?C.textSoft:C.text,textDecoration:item.checked?"line-through":"none"}}>{item.name}</div><div style={{fontSize:11,color:C.textSoft,marginTop:2}}>Previsto: {item.qty} {item.unit}</div></div>{item.checked&&<div style={{display:"flex",alignItems:"center",gap:6}}><input type="number" placeholder={item.qty} value={item.actualQty??""} onChange={e=>updQty(item.id,e.target.value)} style={{width:58,background:C.bg,border:`1px solid ${C.viridianXL}`,borderRadius:6,padding:"6px 8px",color:C.viridian,fontSize:13,textAlign:"center"}}/><span style={{fontSize:11,color:C.textSoft}}>{item.unit}</span></div>}</div>)}</div>)}
